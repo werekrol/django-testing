@@ -1,14 +1,9 @@
 import pytest
+from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 from model_bakery import baker
-from students.models import Course, Student
-from rest_framework.reverse import reverse
-from random import randint
-import json
 
-
-# url = '/api/v1/courses/'
-url = reverse("courses-list")
+from students.models import Student, Course
 
 
 @pytest.fixture
@@ -17,144 +12,151 @@ def client():
 
 
 @pytest.fixture
-def students_factory():
+def student_factory():
     def factory(*args, **kwargs):
         return baker.make(Student, *args, **kwargs)
-    return factory
 
 
 @pytest.fixture
-def courses_factory():
+def course_factory():
     def factory(*args, **kwargs):
         return baker.make(Course, *args, **kwargs)
+
     return factory
 
 
-@pytest.mark.django_db
-def test_get_course(client, students_factory, courses_factory):
-    # Arrange
+"""
+проверка получения 1го курса (retrieve-логика)
+    создаем курс через фабрику
+    строим урл и делаем запрос через тестовый клиент
+    проверяем, что вернулся именно тот курс, который запрашивали
+"""
 
-    courses = courses_factory(_quantity=20)
+
+@pytest.mark.django_db
+def test_get_course(client, course_factory):
+    # Arrange
+    courses = course_factory(_quantity=1)
+
+    temp_id = courses[Course.objects.count()-1].id
+    temp_url = '/api/v1/courses/' + f'{temp_id}' + '/'
 
     # Act
-    response = client.get(f'{url}8/')
+    response = client.get(temp_url)
 
     # Assert
-
     assert response.status_code == 200
     data = response.json()
-    assert data['id'] == 8
+    assert temp_id == data['id']
+
+
+"""
+проверка получения списка курсов (list-логика)
+    аналогично – сначала вызываем фабрики, затем делаем запрос и проверяем результат
+"""
 
 
 @pytest.mark.django_db
-def test_get_course_list(client, students_factory, courses_factory):
+def test_get_courses(client, course_factory):
     # Arrange
-
-    courses = courses_factory(_quantity=20)
+    courses = course_factory(_quantity=10)
 
     # Act
-
-    response = client.get(url)
+    response = client.get('/api/v1/courses/')
 
     # Assert
-
     assert response.status_code == 200
     data = response.json()
     assert len(data) == len(courses)
+    for i, m in enumerate(data):
+        assert m['name'] == courses[i].name
+
+
+"""
+проверка фильтрации списка курсов по id
+    создаем курсы через фабрику, передать id одного курса в фильтр, проверить результат запроса с фильтром
+"""
 
 
 @pytest.mark.django_db
-def test_get_course_filter_id(client, students_factory, courses_factory):
-
-    # Arrange
-
-    id_count = len(Course.objects.all())
-    course_for_test = Course.objects.create(id=id_count + 1, name='name_for_test1')
-    courses = courses_factory(_quantity=19)
+def test_filter_by_id(client, course_factory):
+    count = Course.objects.count()
+    courses = course_factory(_quantity=1, name='TestText')
+    temp_id = courses[count-1].id
+    temp_url = '/api/v1/courses/?id=' + f'{temp_id}'
 
     # Act
-
-
-    response = client.get(f'{url}?id={course_for_test.id}')
-
-    # Assert
-
-    assert response.status_code == 200
+    response = client.get(temp_url)
     data = response.json()
-    assert data[0]['id'] == course_for_test.id
-
-
-@pytest.mark.django_db
-def test_get_course_filter_name(client, students_factory, courses_factory):
-
-    # Arrange
-
-    course_for_test = Course.objects.create(name='name_for_test2')
-    courses = courses_factory(_quantity=19)
-
-    # Act
-
-    response = client.get(f'{url}?name={course_for_test.name}')
-
-    # Assert
-
     assert response.status_code == 200
-    data = response.json()
-    assert data[0]['name'] == course_for_test.name
+    for m in data:
+        assert m['id'] == temp_id
+
+
+"""
+проверка фильтрации списка курсов по name
+"""
 
 
 @pytest.mark.django_db
-def test_create_course(client, students_factory, courses_factory):
+def test_filter_by_name(client):
 
-    # Arrange
+    response = client.get('/api/v1/courses/?name=TestText')
+    data = response.json()
+    assert response.status_code == 200
+    for m in data:
+        assert m['name'] == 'TestText'
 
-    data = {
-        'name': 'name_for_test3'
-    }
 
-    # Act
+"""
+тест успешного создания курса
+    здесь фабрика не нужна, готовим JSON-данные и создаем курс
+"""
 
-    response = client.post(url, data)
 
-    # Assert
+@pytest.mark.django_db
+def test_create_json_course(client):
+    count = Course.objects.count()
+    response = client.post('/api/v1/courses/', data={'name': 'test text json create'})
 
     assert response.status_code == 201
-    assert Course.objects.get(name='name_for_test3').name == 'name_for_test3'
+    assert Course.objects.count() == count + 1
+
+
+"""
+тест успешного обновления курса
+    сначала через фабрику создаем, потом обновляем JSON-данным...
+"""
 
 
 @pytest.mark.django_db
-def test_update_course(client, students_factory, courses_factory):
+def test_update_course(client, course_factory):
 
-    # Arrange
+    count = Course.objects.count()
+    courses = course_factory(_quantity=1)
+    assert Course.objects.count() == count + 1
 
-    courses = courses_factory(_quantity=1)
-
-    data = {
-        'name': 'name_for_test4'
-    }
-
-    # Act
-
-    response = client.patch(f'{url}{courses[0].id}/', data)
-
-    # Assert
+    temp_id = courses[count].id
+    temp_url = '/api/v1/courses/' + f'{temp_id}' + '/'
+    response = client.put(temp_url, data={'name': 'test json update'})
 
     assert response.status_code == 200
-    assert Course.objects.get(id=courses[0].id).name == data['name']
+
+
+"""
+тест успешного удаления курса
+"""
 
 
 @pytest.mark.django_db
-def test_drop_course(client, students_factory, courses_factory):
+def test_delete_course(client, course_factory):
 
-    # Arrange
+    count = Course.objects.count()
+    courses = course_factory(_quantity=1)
+    assert Course.objects.count() == count + 1
 
-    courses = courses_factory(_quantity=1)
-
-    # Act
-
-    response = client.delete(f'{url}{courses[0].id}/')
-
-    # Assert
+    temp_id = courses[count].id
+    temp_url = '/api/v1/courses/' + f'{temp_id}' + '/'
+    response = client.delete(temp_url)
 
     assert response.status_code == 204
-    assert courses[0].id not in list(course.id for course in Course.objects.all())
